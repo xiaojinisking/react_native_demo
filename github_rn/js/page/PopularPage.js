@@ -1,12 +1,22 @@
 import React, {Component} from 'react';
-import {Platform, StyleSheet, Text, View, Button} from 'react-native';
+import {
+	Platform,
+	StyleSheet,
+	Text,
+	View,
+	Button,
+	FlatList,
+	RefreshControl,
+	ActivityIndicator
+} from 'react-native';
 import {
 	createMaterialTopTabNavigator,
 	createAppContainer
 } from 'react-navigation'
-import NavigationUtil from '../navigator/NavigationUtil';
 import {connect} from "react-redux";
 import actions from '../action/index';
+import PopularItem from "../common/PopularItem";
+import Toast from 'react-native-easy-toast';
 
 const URL = 'https://api.github.com/search/repositories?q=';
 const QUERY_STR = '&sort=stars';
@@ -23,11 +33,13 @@ export default class PopularPage extends Component<Props> {
 	_genTabs() {
 		const tabs = {};
 		this.tabNames.forEach((item, index) => {
-			tabs[`tab${index}`] = {
-				// screen: PopularTab,
-				screen: props => <PopularTabPages {...props} tableLabel={item}/>,		//实现初始化时传参
-				navigationOptions: {
-					title: item
+			if (item == 'Java') {
+				tabs[`tab${index}`] = {
+					// screen: PopularTab,
+					screen: props => <PopularTabPages {...props} tableLabel={item}/>,		//实现初始化时传参
+					navigationOptions: {
+						title: item
+					}
 				}
 			}
 		})
@@ -68,64 +80,131 @@ class PopularTab extends Component<Props> {
 
 	//页面第一次render前
 	componentDidMount() {
-		this.loadData();	//加载数据
+		this.loadData(false);	//加载数据
 	}
 
 	//卸载页面前
 	componentWillUnmount(): void {
 	}
 
-	loadData() {
-		const {onRefreshPopular} = this.props;
+	loadData(loadmore) {
+		const {onRefreshPopular, onLoadMorePopular} = this.props;
 		const url = this.genFetchUrl(this.storeName);
-		onRefreshPopular(this.storeName,url,pageSize)
+		const store = this._store();
+		if (loadmore) {
+			onLoadMorePopular(this.storeName, ++store.pageIndex, pageSize, store.items, callback => {
+				this.refs.toast.show('没有更多了');
+				alert('没有更多')
+			})
+		} else {
+			onRefreshPopular(this.storeName, url, pageSize)
+		}
+
+
 	}
 
-	genFetchUrl(key){
+	genFetchUrl(key) {
 		return URL + key + QUERY_STR;
 	}
 
+	_store() {
+		const {popular} = this.props;
+		let store = popular[this.storeName];
+		if (!store) {
+			store = {
+				items: [],
+				isLoading: false,
+				projectModels: [],//要显示的数据
+				hideLoadingMore: true//默认隐藏加载更多
+			}
+		}
+
+		return store;
+	}
+
+	_renderItem(data) {
+		return <PopularItem
+			 item={data.item}
+			 onSelect={() => {
+
+			 }}
+		/>
+	}
+
+	//底部上拉加载组件
+	genIndicator() {
+
+		console.log('hideLoadingMore', this._store().hideLoadingMore)
+		return this._store().hideLoadingMore ? null :
+			 <View style={styles.indicatorContainer}>
+				 <ActivityIndicator
+						style={styles.indicator}
+				 />
+				 <Text>正在加载更多</Text>
+			 </View>
+	}
 
 	render() {
+		let store = this._store();
+		const {theme} = this.props;
 		return (
 			 <View style={styles.container}>
-				 <Text style={styles.welcome}>{this.storeName}</Text>
-				 <Text onPress={() => {
-					 NavigationUtil.goPage({
-						 navigation: this.props.navigation
-					 }, "DetailPage")
-				 }}>跳转到详情页</Text>
+				 <FlatList
+						data={store.projectModels}
+						renderItem={data => this._renderItem(data)}
+						keyExtractor={(item, index) => index}
+						refreshControl={
+							<RefreshControl
+								 title={'Loading'}        //指定刷新指示器下显示的文字
+								 titleColor={theme.theme}  //刷新指示器下显示等文字的颜色
+								 colors={theme.theme}      //刷新指示器颜色
+								 refreshing={store.isLoading}        //视图是否应该在刷新时显示指示器。
+								 onRefresh={() => this.loadData()}    //在视图开始刷新时调用
+								 tintColor={theme.theme}            //指定刷新指示器的颜色
+							/>
+						}
+						ListFooterComponent={() => this.genIndicator()}
+						onEndReachedThreshold={0.5}      //决定当距离内容最底部还有多远时触发onEndReached回调。注意此参数是一个比值而非像素单位。比如，0.5 表示距离内容最底部的距离为当前列表可见长度的一半时触发。
+						onEndReached={() => {//当列表被滚动到距离内容最底部不足onEndReachedThreshold的距离时调用。
+							setTimeout(() => {
+								if (this.canLoadMore) {
+									console.log('---onEndReachedLoad----');
+									this.canLoadMore = false;
+									this.loadData(true);
+								}
+								console.log('---onEndReached----');
+							}, 100)
+						}}
+						onScrollBeginDrag={() => {
+							this.canLoadMore = true;//fix 初始化时页面调用onEndReached的问题
+							console.log('-----onMomentumScrollBegin-----');
+						}}
+				 />
+				 <Toast ref='toast'/>
 			 </View>
 		);
 	}
 }
 
 
-const mapStateToProps = state =>({
-	popular:state.popular
+const mapStateToProps = state => ({
+	popular: state.popular,
+	theme: state.theme
 })
 
 
 const mapDispatchToProps = dispatch => ({
-	onRefreshPopular: (storeName,url,pageSize)=>dispatch(actions.onRefreshPopular(storeName,url,pageSize))
+	onRefreshPopular: (storeName, url, pageSize) => dispatch(actions.onRefreshPopular(storeName, url, pageSize)),
+	onLoadMorePopular: (storeName, pageIndex, pageSize, items, callBack) => dispatch(actions.onLoadMorePopular(storeName, pageIndex, pageSize, items, callBack))
 })
 
 
-const PopularTabPages = connect(mapStateToProps,mapDispatchToProps)(PopularTab)
-
+const PopularTabPages = connect(mapStateToProps, mapDispatchToProps)(PopularTab)
 
 
 const styles = StyleSheet.create({
 	container: {
 		flex: 1,
-		justifyContent: 'center',
-		alignItems: 'center',
-		backgroundColor: '#F5FCFF',
-	},
-	welcome: {
-		fontSize: 20,
-		textAlign: 'center',
-		margin: 10,
 	},
 	tabStyles: {
 		minWidth: 50
@@ -138,5 +217,13 @@ const styles = StyleSheet.create({
 		fontSize: 13,
 		marginTop: 16,
 		marginBottom: 6
-	}
+	},
+	indicator: {
+		color: 'red',
+		margin: 10
+
+	},
+	indicatorContainer: {
+		alignItems: "center"
+	},
 });

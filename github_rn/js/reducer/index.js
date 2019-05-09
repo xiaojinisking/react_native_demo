@@ -4,6 +4,7 @@ import popular from './popular';
 import {rootCom, RootNavigator} from "../navigator/AppNavigator";
 import {createNavigationReducer} from "react-navigation-redux-helpers";
 
+
 const navReducer = createNavigationReducer(RootNavigator);
 
 const index = combineReducers({
